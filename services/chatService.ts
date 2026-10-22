@@ -807,6 +807,7 @@ export const createGroupConversation = async (
         type: 'group',
         name: name.trim(),
         avatar: avatar || null,
+        ownerId: creatorId,
         participants: {
           create: uniqueUserIds.map((userId) => ({
             userId,
@@ -867,8 +868,11 @@ export const addGroupParticipants = async (
       throw new ApiError(403, 'You are not a member of this conversation');
     }
 
-    if (userParticipant.role !== 'admin') {
-      throw new ApiError(403, 'Only group admins can add participants to this group');
+    const isOwner = conversation.ownerId === userId;
+    const isRequesterAdmin = userParticipant.role === 'admin' || isOwner;
+
+    if (!isRequesterAdmin) {
+      throw new ApiError(403, 'Only group admins or owner can add participants to this group');
     }
 
     const existingParticipantIds = new Set(conversation.participants.map((p: any) => p.userId));
@@ -963,25 +967,46 @@ export const removeGroupParticipant = async (
     }
 
     const isSelfRemoval = userId === targetUserId;
+    const isOwner = conversation.ownerId === userId;
+    const isTargetOwner = conversation.ownerId === targetUserId;
+    const isRequesterAdmin = userParticipant.role === 'admin' || isOwner;
+    const isTargetAdmin = targetParticipant.role === 'admin' || isTargetOwner;
 
     if (!isSelfRemoval) {
-      if (userParticipant.role !== 'admin') {
-        throw new ApiError(403, 'Only group admins can remove participants');
+      if (!isRequesterAdmin) {
+        throw new ApiError(403, 'Only group admins or owner can remove participants');
       }
 
-      if (targetParticipant.role === 'admin') {
-        const remainingAdmins = conversation.participants.filter(
-          (p: any) => p.userId !== targetUserId && p.role === 'admin'
-        );
-        if (remainingAdmins.length === 0) {
-          throw new ApiError(400, 'Cannot remove the last admin of the group');
-        }
+      if (isTargetOwner) {
+        throw new ApiError(403, 'Nobody can remove the group owner');
+      }
+
+      if (isTargetAdmin && !isOwner) {
+        throw new ApiError(403, 'Admins cannot remove each other. Only the group owner can remove an admin.');
       }
     }
 
     const remainingParticipants = conversation.participants.filter((p: any) => p.userId !== targetUserId);
 
-    if (isSelfRemoval && userParticipant.role === 'admin' && remainingParticipants.length > 0) {
+    let newOwnerId = conversation.ownerId;
+    if (isSelfRemoval && isTargetOwner && remainingParticipants.length > 0) {
+      const remainingAdmins = remainingParticipants.filter((p: any) => p.role === 'admin');
+      const candidates = remainingAdmins.length > 0 ? remainingAdmins : remainingParticipants;
+      const sorted = [...candidates].sort(
+        (a: any, b: any) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime()
+      );
+      const nextOwner = sorted[0];
+      if (nextOwner) {
+        newOwnerId = nextOwner.userId;
+        if (nextOwner.role !== 'admin') {
+          await tx.conversationParticipant.update({
+            where: { id: nextOwner.id },
+            data: { role: 'admin' }
+          });
+          nextOwner.role = 'admin';
+        }
+      }
+    } else if (isSelfRemoval && userParticipant.role === 'admin' && remainingParticipants.length > 0) {
       const remainingAdmins = remainingParticipants.filter((p: any) => p.role === 'admin');
       if (remainingAdmins.length === 0) {
         const sorted = [...remainingParticipants].sort(
@@ -1022,6 +1047,7 @@ export const removeGroupParticipant = async (
     const updatedConv = await tx.conversation.update({
       where: { id: conversationId },
       data: {
+        ownerId: newOwnerId,
         updatedAt: new Date()
       },
       include: {
@@ -1087,8 +1113,11 @@ export const updateGroupConversation = async (
       throw new ApiError(403, 'You are not a member of this conversation');
     }
 
-    if (userParticipant.role !== 'admin') {
-      throw new ApiError(403, 'Only group admins can update group details');
+    const isOwner = conversation.ownerId === userId;
+    const isRequesterAdmin = userParticipant.role === 'admin' || isOwner;
+
+    if (!isRequesterAdmin) {
+      throw new ApiError(403, 'Only group admins or owner can update group details');
     }
 
     const dataToUpdate: any = {};
@@ -1159,8 +1188,11 @@ export const makeGroupAdmin = async (
       throw new ApiError(403, 'You are not a member of this conversation');
     }
 
-    if (requester.role !== 'admin') {
-      throw new ApiError(403, 'Only group admins can promote members to admin');
+    const isOwner = conversation.ownerId === userId;
+    const isRequesterAdmin = requester.role === 'admin' || isOwner;
+
+    if (!isRequesterAdmin) {
+      throw new ApiError(403, 'Only group admins or owner can promote members to admin');
     }
 
     const target = conversation.participants.find((p: any) => p.userId === targetUserId);
@@ -1233,12 +1265,19 @@ export const dismissGroupAdmin = async (
       throw new ApiError(403, 'You are not a member of this conversation');
     }
 
-    if (requester.role !== 'admin') {
-      throw new ApiError(403, 'Only group admins can remove admin privileges');
+    const isOwner = conversation.ownerId === userId;
+    const isTargetOwner = conversation.ownerId === targetUserId;
+
+    if (!isOwner) {
+      throw new ApiError(403, 'Only the group owner can remove admin privileges from an admin');
+    }
+
+    if (isTargetOwner) {
+      throw new ApiError(403, 'Nobody can demote the group owner');
     }
 
     if (targetUserId === userId) {
-      throw new ApiError(400, 'Admins cannot demote themselves directly. Use Leave Group to leave.');
+      throw new ApiError(400, 'Owners cannot demote themselves directly. Transfer ownership or use Leave Group.');
     }
 
     const target = conversation.participants.find((p: any) => p.userId === targetUserId);
@@ -1248,13 +1287,6 @@ export const dismissGroupAdmin = async (
 
     if (target.role !== 'admin') {
       throw new ApiError(400, 'User is not an admin');
-    }
-
-    const remainingAdmins = conversation.participants.filter(
-      (p: any) => p.userId !== targetUserId && p.role === 'admin'
-    );
-    if (remainingAdmins.length === 0) {
-      throw new ApiError(400, 'Cannot demote the last admin of the group');
     }
 
     await tx.conversationParticipant.update({
