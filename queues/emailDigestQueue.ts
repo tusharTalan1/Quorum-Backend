@@ -9,7 +9,7 @@ export const emailDigestQueue = new Queue('emailDigestQueue', {
 });
 
 export const queueEmailDigest = async (userId: string) => {
-  const jobId = `digest:${userId}`;
+  const jobId = `digest-${userId}`;
   try {
     await emailDigestQueue.add(
       'send-digest',
