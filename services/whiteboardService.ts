@@ -245,12 +245,6 @@ export const createWhiteboard = async (
 
     let shouldUpdateMeetingOrg = false;
     if (!meeting.organizationId) {
-      if (meeting.hostId !== userId) {
-        throw new ApiError(
-          403,
-          'Only the meeting host can assign an organization to this meeting'
-        );
-      }
       shouldUpdateMeetingOrg = true;
     }
 
@@ -595,6 +589,8 @@ export const getWhiteboardById = async (userId: string, whiteboardId: string) =>
                 id: true,
                 code: true,
                 status: true,
+                hostId: true,
+                admitted: true,
               },
             },
           },
@@ -615,7 +611,17 @@ export const getWhiteboardById = async (userId: string, whiteboardId: string) =>
     throw new ApiError(404, 'Whiteboard not found');
   }
 
-  await assertUserBelongsToOrganization(userId, whiteboard.organizationId);
+  try {
+    await assertUserBelongsToOrganization(userId, whiteboard.organizationId);
+  } catch (orgErr) {
+    const isMeetingParticipant = whiteboard.meetings?.some((wm: any) => {
+      const m = wm.meeting;
+      return m && (m.hostId === userId || (Array.isArray(m.admitted) && m.admitted.includes(userId)));
+    });
+    if (!isMeetingParticipant) {
+      throw orgErr;
+    }
+  }
 
   return whiteboard;
 };
@@ -634,7 +640,24 @@ export const updateWhiteboard = async (
     throw new ApiError(404, 'Whiteboard not found');
   }
 
-  await assertUserBelongsToOrganization(userId, existing.organizationId);
+  try {
+    await assertUserBelongsToOrganization(userId, existing.organizationId);
+  } catch (orgErr) {
+    const isMeetingParticipant = await prisma.whiteboardMeeting.findFirst({
+      where: {
+        whiteboardId,
+        meeting: {
+          OR: [
+            { hostId: userId },
+            { admitted: { has: userId } },
+          ],
+        },
+      },
+    });
+    if (!isMeetingParticipant) {
+      throw orgErr;
+    }
+  }
 
   if (input.content !== undefined) {
     return coordinatedUpdateWhiteboard(userId, whiteboardId, input);
@@ -771,12 +794,6 @@ export const linkWhiteboardToMeeting = async (
 
   let shouldUpdateMeetingOrg = false;
   if (!meeting.organizationId) {
-    if (meeting.hostId !== userId) {
-      throw new ApiError(
-        403,
-        'Only the meeting host can assign an organization to this meeting'
-      );
-    }
     shouldUpdateMeetingOrg = true;
   }
 
@@ -905,20 +922,73 @@ export const createWhiteboardForMeeting = async (
   let shouldAssignOrg = false;
 
   if (!targetOrgId) {
-    if (meeting.hostId !== userId) {
-      throw new ApiError(
-        403,
-        'Only the meeting host can assign an organization to this meeting'
-      );
+    if (data.organizationId) {
+      targetOrgId = data.organizationId;
+      await assertUserBelongsToOrganization(userId, targetOrgId);
+    } else {
+      if (meeting.hostId) {
+        const hostMembership = await prisma.organizationMember.findFirst({
+          where: { userId: meeting.hostId },
+          select: { organizationId: true },
+          orderBy: { joinedAt: 'desc' },
+        });
+        if (hostMembership) {
+          targetOrgId = hostMembership.organizationId;
+        } else {
+          const hostOwnedOrg = await prisma.organization.findFirst({
+            where: { ownerId: meeting.hostId },
+            select: { id: true },
+            orderBy: { createdAt: 'desc' },
+          });
+          if (hostOwnedOrg) {
+            targetOrgId = hostOwnedOrg.id;
+          }
+        }
+      }
+
+      if (!targetOrgId) {
+        const userMembership = await prisma.organizationMember.findFirst({
+          where: { userId },
+          select: { organizationId: true },
+          orderBy: { joinedAt: 'desc' },
+        });
+        if (userMembership) {
+          targetOrgId = userMembership.organizationId;
+        } else {
+          const ownedOrg = await prisma.organization.findFirst({
+            where: { ownerId: userId },
+            select: { id: true },
+            orderBy: { createdAt: 'desc' },
+          });
+          if (ownedOrg) {
+            targetOrgId = ownedOrg.id;
+          }
+        }
+      }
+
+      if (!targetOrgId) {
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { id: true, name: true },
+        });
+        const orgName = user?.name ? `${user.name}'s Workspace` : 'Personal Workspace';
+        const slug = `workspace-${userId.slice(0, 8)}-${Date.now()}`;
+        const newOrg = await prisma.organization.create({
+          data: {
+            name: orgName,
+            slug,
+            ownerId: userId,
+            members: {
+              create: {
+                userId,
+                role: OrgRole.ORG_ADMIN,
+              },
+            },
+          },
+        });
+        targetOrgId = newOrg.id;
+      }
     }
-    if (!data.organizationId) {
-      throw new ApiError(
-        400,
-        'organizationId is required when creating a whiteboard for a meeting that is not yet linked to an organization'
-      );
-    }
-    targetOrgId = data.organizationId;
-    await assertUserBelongsToOrganization(userId, targetOrgId);
     shouldAssignOrg = true;
   } else {
     if (data.organizationId && data.organizationId !== targetOrgId) {
@@ -927,7 +997,14 @@ export const createWhiteboardForMeeting = async (
         'Meeting and whiteboard must belong to the same organization'
       );
     }
-    await assertUserBelongsToOrganization(userId, targetOrgId);
+    try {
+      await assertUserBelongsToOrganization(userId, targetOrgId);
+    } catch (orgErr) {
+      const canAccess = meeting.hostId === userId || (Array.isArray(meeting.admitted) && meeting.admitted.includes(userId));
+      if (!canAccess) {
+        throw orgErr;
+      }
+    }
   }
 
   const defaultContent: Prisma.InputJsonObject = {

@@ -1057,8 +1057,6 @@ export const registerWhiteboardHandler = (io: Server, socket: Socket) => {
           targetOrgId = boardMeta.organizationId;
         }
 
-        await assertUserBelongsToOrganization(userId, targetOrgId);
-
         let meetingToLink: any = null;
         if (meetingCode) {
           const meeting = await findMeetingByCodeOrId(meetingCode);
@@ -1072,17 +1070,15 @@ export const registerWhiteboardHandler = (io: Server, socket: Socket) => {
             return;
           }
 
-          if (!meeting.organizationId) {
-            if (meeting.hostId !== userId) {
-              ack?.({
-                success: false,
-                message: 'Only the meeting host can assign an organization to this meeting',
-              });
-              return;
-            }
-          }
-
           meetingToLink = meeting;
+        }
+
+        try {
+          await assertUserBelongsToOrganization(userId, targetOrgId);
+        } catch (orgErr) {
+          if (!meetingToLink) {
+            throw orgErr;
+          }
         }
 
         const session = await getOrCreateSession(boardId);
