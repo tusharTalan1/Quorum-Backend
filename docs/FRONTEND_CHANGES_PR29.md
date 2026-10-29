@@ -165,3 +165,74 @@ For developer convenience, the OTP routes are mounted under multiple paths and c
 * `POST /api/v1/auth/verify-email` ↔ `POST /api/v1/otp/verify-email`
 * `POST /api/auth/send-otp` ↔ `POST /api/otp/send-otp`
 * `POST /api/v1/auth/send-otp` ↔ `POST /api/v1/otp/send-otp`
+
+---
+
+## 5. Recent Fixes & Real-Time Updates (PR #30 & Team Chat Fix)
+
+### A. Team Chat Messages (`POST /api/organizations/:id/teams/:teamId/messages`)
+
+* **Multipart `FormData` & Attachment Support**:
+  * You can send team messages using either `FormData` or `application/json`.
+  * If sending attachments (images, PDFs, documents), append the file directly to your `FormData`:
+    ```ts
+    const formData = new FormData();
+    formData.append('content', messageText);
+    if (file) {
+      formData.append('file', file);
+    }
+    formData.append('clientMessageId', crypto.randomUUID());
+    ```
+  * If sending plain JSON:
+    ```json
+    {
+      "content": "Hello team!",
+      "clientMessageId": "d3b07384-d113-4ec6-8968-3e4f3a763c32"
+    }
+    ```
+* **Message Idempotency (`clientMessageId`)**:
+  * Providing `clientMessageId` guarantees that network retries will not duplicate messages or cause sequence number conflicts.
+
+---
+
+### B. Authentication Fallback & Refresh Route Alias
+
+* **Refresh Endpoint Alias**: Both endpoints are now supported:
+  * `POST /api/auth/refresh`
+  * `POST /api/auth/refresh-token`
+* **Cookie-Based Fallback**:
+  * The backend checks `accessToken` from both the `Authorization: Bearer <token>` header and the `httpOnly` cookie.
+  * If the header token expires before your client refreshes it, requests will not fail with `401` as long as a valid session cookie is present.
+  * Always configure `withCredentials: true` in your HTTP client:
+    ```ts
+    // Axios
+    axios.defaults.withCredentials = true;
+
+    // Fetch
+    fetch(url, { credentials: 'include' });
+    ```
+
+---
+
+### C. Socket.IO Connection Resiliency
+
+* Connect with `withCredentials: true` so the socket handshake can verify session cookies even if local storage / in-memory tokens are stale:
+  ```ts
+  import { io } from 'socket.io-client';
+
+  const socket = io(SOCKET_URL, {
+    withCredentials: true,
+    auth: {
+      token: accessToken, // optional fallback
+    },
+    transports: ['websocket', 'polling'],
+  });
+  ```
+
+---
+
+### D. Community Post Polling
+
+* If you observe repeated `GET /api/posts?limit=50` requests in DevTools:
+  * Check your query hooks (e.g. `refetchInterval` in React Query or custom `setInterval`).
+  * Ensure polling is disabled when unauthenticated or when the window/tab is in the background.
