@@ -57,6 +57,7 @@ model User {
   assignedProjectTasks     ProjectTask[]             @relation("ProjectTaskAssignee")
   createdProjectTasks      ProjectTask[]             @relation("ProjectTaskCreator")
   uploadedProjectResources ProjectResource[]         @relation("ProjectResourceUploader")
+  messageReactions         MessageReaction[]
 }
 
 model RefreshToken {
