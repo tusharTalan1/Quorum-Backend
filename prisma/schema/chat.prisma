@@ -40,6 +40,8 @@ model Message {
   fileType         String?
   fileName         String?
   fileSize         Int?
+  audioDuration    Int?
+  audioWaveform    Float[]           @default([])
   isPinned         Boolean           @default(false)
   clientMessageId  String?
   seq              Int               @default(0)
