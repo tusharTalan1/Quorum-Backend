@@ -62,15 +62,16 @@ Leave a conversation room when navigating away from the chat screen.
   ```
 
 #### 3. `message:send`
-Send a new text or media message in a conversation. Supports optimistic UI via `clientMessageId`.
+Send a new text or media message in a conversation. Supports optimistic UI via `clientMessageId` and quoted replies via `replyToId`.
 * **Payload:**
   ```json
   {
     "conversationId": "c4b9d031-18e4-4d45-933e-b490f2302821",
     "clientMessageId": "temp-uuid-12345",
-    "content": "Hello world!",
+    "content": "Sounds great! Let's do that.",
     "fileUrl": "https://res.cloudinary.com/quorum/image/upload/sample.jpg",
-    "fileType": "image"
+    "fileType": "image",
+    "replyToId": "msg-original-uuid-123"
   }
   ```
 * **Acknowledgement Callback:**
@@ -81,10 +82,28 @@ Send a new text or media message in a conversation. Supports optimistic UI via `
       "id": "msg-9f20e4b8-2e0f-4df4-a829-d591b9204391",
       "conversationId": "c4b9d031-18e4-4d45-933e-b490f2302821",
       "senderId": "user-uuid-123",
-      "content": "Hello world!",
+      "content": "Sounds great! Let's do that.",
       "fileUrl": "https://res.cloudinary.com/quorum/image/upload/sample.jpg",
       "fileType": "image",
       "seq": 42,
+      "replyToId": "msg-original-uuid-123",
+      "replyTo": {
+        "id": "msg-original-uuid-123",
+        "content": "Should we deploy this afternoon?",
+        "fileUrl": null,
+        "fileType": null,
+        "sender": {
+          "id": "user-uuid-456",
+          "name": "Sarah Connor",
+          "avatar": "https://res.cloudinary.com/..."
+        }
+      },
+      "isEdited": false,
+      "editedAt": null,
+      "isForwarded": false,
+      "forwardCount": 0,
+      "isDeleted": false,
+      "reactions": [],
       "createdAt": "2026-10-09T18:00:00.000Z",
       "sender": {
         "id": "user-uuid-123",
@@ -127,12 +146,114 @@ Notify participants that the current user started or stopped typing. (Debounce o
   }
   ```
 
+#### 6. `message:edit`
+Edit a previously sent message within the 24-hour edit window (sender-only).
+* **Payload:**
+  ```json
+  {
+    "conversationId": "c4b9d031-18e4-4d45-933e-b490f2302821",
+    "messageId": "msg-9f20e4b8-2e0f-4df4-a829-d591b9204391",
+    "content": "Updated message content here"
+  }
+  ```
+* **Acknowledgement Callback:**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "id": "msg-9f20e4b8-2e0f-4df4-a829-d591b9204391",
+      "content": "Updated message content here",
+      "isEdited": true,
+      "editedAt": "2026-10-09T18:05:00.000Z"
+    }
+  }
+  ```
+
+#### 7. `message:delete`
+Delete a message for everyone (or sender). Masks deleted text with `"This message was deleted"` and preserves reply chain hierarchy.
+* **Payload:**
+  ```json
+  {
+    "conversationId": "c4b9d031-18e4-4d45-933e-b490f2302821",
+    "messageId": "msg-9f20e4b8-2e0f-4df4-a829-d591b9204391",
+    "deleteForEveryone": true
+  }
+  ```
+* **Acknowledgement Callback:**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "id": "msg-9f20e4b8-2e0f-4df4-a829-d591b9204391",
+      "content": "This message was deleted",
+      "isDeleted": true,
+      "deletedAt": "2026-10-09T18:06:00.000Z"
+    }
+  }
+  ```
+
+#### 8. `message:react`
+Toggle an emoji reaction on any message. Sending the same emoji again removes the reaction (WhatsApp-style toggle).
+* **Payload:**
+  ```json
+  {
+    "conversationId": "c4b9d031-18e4-4d45-933e-b490f2302821",
+    "messageId": "msg-9f20e4b8-2e0f-4df4-a829-d591b9204391",
+    "emoji": "👍"
+  }
+  ```
+* **Acknowledgement Callback:**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "messageId": "msg-9f20e4b8-2e0f-4df4-a829-d591b9204391",
+      "conversationId": "c4b9d031-18e4-4d45-933e-b490f2302821",
+      "reactions": [
+        {
+          "emoji": "👍",
+          "count": 2,
+          "users": [
+            { "id": "user-uuid-1", "name": "Jane", "avatar": "https://..." },
+            { "id": "user-uuid-2", "name": "Bob", "avatar": null }
+          ]
+        }
+      ]
+    }
+  }
+  ```
+
+#### 9. `message:forward`
+Forward one or more messages to one or more target conversations simultaneously. Automatically clones contents and attachments with `isForwarded: true` and incremented `forwardCount`.
+* **Payload:**
+  ```json
+  {
+    "messageIds": ["msg-uuid-1", "msg-uuid-2"],
+    "targetConversationIds": ["conv-uuid-target-a", "conv-uuid-target-b"]
+  }
+  ```
+* **Acknowledgement Callback:**
+  ```json
+  {
+    "success": true,
+    "data": [
+      {
+        "id": "msg-new-clone-uuid",
+        "conversationId": "conv-uuid-target-a",
+        "content": "Original message text",
+        "isForwarded": true,
+        "forwardCount": 1
+      }
+    ]
+  }
+  ```
+
 ---
 
 ### B. Server → Client Broadcast Events
 
 #### 1. `message:new`
-Broadcasted to the conversation room when a new message is posted.
+Broadcasted to the conversation room when a new message is posted or forwarded.
 * **Payload:**
   ```json
   {
@@ -142,6 +263,16 @@ Broadcasted to the conversation room when a new message is posted.
     "content": "Hello!",
     "fileUrl": null,
     "fileType": null,
+    "replyToId": "msg-reply-target-uuid",
+    "replyTo": {
+      "id": "msg-reply-target-uuid",
+      "content": "Original message text",
+      "sender": { "id": "user-id", "name": "Original Sender", "avatar": "..." }
+    },
+    "isEdited": false,
+    "isForwarded": false,
+    "forwardCount": 0,
+    "reactions": [],
     "seq": 43,
     "createdAt": "2026-10-09T18:01:00.000Z",
     "sender": {
@@ -152,7 +283,53 @@ Broadcasted to the conversation room when a new message is posted.
   }
   ```
 
-#### 2. `conversation:update`
+#### 2. `message:updated`
+Broadcasted to conversation participants when a sender edits a message.
+* **Payload:**
+  ```json
+  {
+    "id": "msg-uuid",
+    "conversationId": "conv-uuid",
+    "content": "Updated message content",
+    "isEdited": true,
+    "editedAt": "2026-10-09T18:05:00.000Z"
+  }
+  ```
+
+#### 3. `message:deleted`
+Broadcasted to conversation participants when a message is soft-deleted ("Delete for everyone").
+* **Payload:**
+  ```json
+  {
+    "id": "msg-uuid",
+    "conversationId": "conv-uuid",
+    "content": "This message was deleted",
+    "fileUrl": null,
+    "isDeleted": true,
+    "deletedAt": "2026-10-09T18:06:00.000Z"
+  }
+  ```
+
+#### 4. `message:reaction_updated`
+Broadcasted to conversation participants when a reaction is added or removed.
+* **Payload:**
+  ```json
+  {
+    "messageId": "msg-uuid",
+    "conversationId": "conv-uuid",
+    "reactions": [
+      {
+        "emoji": "👍",
+        "count": 1,
+        "users": [
+          { "id": "user-uuid-1", "name": "Jane", "avatar": "https://..." }
+        ]
+      }
+    ]
+  }
+  ```
+
+#### 5. `conversation:update`
 Broadcasted to participants' user channels (`user:${userId}`) to update the conversation inbox preview (last message and unread count) in real time.
 * **Payload:**
   ```json
@@ -167,7 +344,7 @@ Broadcasted to participants' user channels (`user:${userId}`) to update the conv
   }
   ```
 
-#### 3. `message:read`
+#### 6. `message:read`
 Broadcasted to the conversation when another participant reads messages.
 * **Payload:**
   ```json
@@ -180,7 +357,7 @@ Broadcasted to the conversation when another participant reads messages.
   }
   ```
 
-#### 4. `typing:start` & `typing:stop`
+#### 7. `typing:start` & `typing:stop`
 Broadcasted when another participant starts or stops typing.
 * **Payload:**
   ```json
@@ -190,7 +367,7 @@ Broadcasted when another participant starts or stops typing.
   }
   ```
 
-#### 5. `conversation:removed`
+#### 8. `conversation:removed`
 Broadcasted to a participant's personal channel (`user:${userId}`) when they are removed from a group conversation by the group owner.
 * **Payload:**
   ```json
@@ -200,7 +377,7 @@ Broadcasted to a participant's personal channel (`user:${userId}`) when they are
   }
   ```
 
-#### 6. `presence:online` & `presence:offline`
+#### 9. `presence:online` & `presence:offline`
 Broadcasted to contacts/co-participants when a user connects or disconnects.
 * **Online Payload:** `{ "userId": "user-uuid" }`
 * **Offline Payload:** `{ "userId": "user-uuid", "lastSeen": "2026-10-09T18:05:00.000Z" }`
@@ -358,7 +535,47 @@ Update group title or avatar picture.
   {
     "success": true,
     "data": {
-      "messages": [ ... ],
+      "messages": [
+        {
+          "id": "msg-uuid-1",
+          "conversationId": "conv-uuid",
+          "senderId": "user-uuid-1",
+          "content": "Sounds good!",
+          "fileUrl": null,
+          "fileType": null,
+          "replyToId": "msg-prev-uuid",
+          "replyTo": {
+            "id": "msg-prev-uuid",
+            "content": "Can we review the PR today?",
+            "fileUrl": null,
+            "sender": {
+              "id": "user-uuid-2",
+              "name": "Jane Doe",
+              "avatar": "https://..."
+            }
+          },
+          "isEdited": false,
+          "editedAt": null,
+          "isForwarded": true,
+          "forwardCount": 1,
+          "isDeleted": false,
+          "reactions": [
+            {
+              "emoji": "👍",
+              "count": 3,
+              "users": [
+                { "id": "user-uuid-2", "name": "Jane", "avatar": "https://..." }
+              ]
+            }
+          ],
+          "createdAt": "2026-10-09T18:00:00.000Z",
+          "sender": {
+            "id": "user-uuid-1",
+            "name": "Alex",
+            "avatar": "https://..."
+          }
+        }
+      ],
       "nextCursor": "msg-uuid-oldest-in-this-page",
       "hasNextPage": true
     }
@@ -440,6 +657,109 @@ Update group title or avatar picture.
   ```json
   {
     "token": "fcm_device_token_from_firebase"
+  }
+  ```
+
+### 12. Edit Message
+Edit a previously sent message within the 24-hour edit window (sender-only).
+* **Endpoint:** `PATCH /api/conversations/:id/messages/:messageId`
+* **Body:**
+  ```json
+  {
+    "content": "Updated message content here"
+  }
+  ```
+* **Response (200 OK):**
+  ```json
+  {
+    "success": true,
+    "message": "Message edited successfully",
+    "data": {
+      "id": "msg-uuid",
+      "content": "Updated message content here",
+      "isEdited": true,
+      "editedAt": "2026-10-09T18:05:00.000Z"
+    }
+  }
+  ```
+
+### 13. Delete Message ("Delete for everyone")
+Soft-deletes message, clears attachment references, and preserves reply-to hierarchy.
+* **Endpoint:** `DELETE /api/conversations/:id/messages/:messageId`
+* **Body (Optional):**
+  ```json
+  {
+    "deleteForEveryone": true
+  }
+  ```
+* **Response (200 OK):**
+  ```json
+  {
+    "success": true,
+    "message": "Message deleted successfully",
+    "data": {
+      "id": "msg-uuid",
+      "content": "This message was deleted",
+      "isDeleted": true,
+      "deletedAt": "2026-10-09T18:06:00.000Z"
+    }
+  }
+  ```
+
+### 14. Toggle Message Reaction
+Toggle emoji reaction on a message (WhatsApp style: adding an emoji again removes it).
+* **Endpoint:** `POST /api/conversations/:id/messages/:messageId/reactions`
+* **Body:**
+  ```json
+  {
+    "emoji": "👍"
+  }
+  ```
+* **Response (200 OK):**
+  ```json
+  {
+    "success": true,
+    "message": "Reaction updated successfully",
+    "data": {
+      "messageId": "msg-uuid",
+      "conversationId": "conv-uuid",
+      "reactions": [
+        {
+          "emoji": "👍",
+          "count": 1,
+          "users": [
+            { "id": "user-uuid-1", "name": "Jane", "avatar": "https://..." }
+          ]
+        }
+      ]
+    }
+  }
+  ```
+
+### 15. Forward Messages
+Forward one or more messages to one or more conversations simultaneously.
+* **Endpoint:** `POST /api/conversations/messages/forward`
+* **Body:**
+  ```json
+  {
+    "messageIds": ["msg-uuid-1", "msg-uuid-2"],
+    "targetConversationIds": ["conv-uuid-target-a", "conv-uuid-target-b"]
+  }
+  ```
+* **Response (200 OK):**
+  ```json
+  {
+    "success": true,
+    "message": "Messages forwarded successfully",
+    "data": [
+      {
+        "id": "msg-new-clone-uuid",
+        "conversationId": "conv-uuid-target-a",
+        "content": "Original message text",
+        "isForwarded": true,
+        "forwardCount": 1
+      }
+    ]
   }
   ```
 
