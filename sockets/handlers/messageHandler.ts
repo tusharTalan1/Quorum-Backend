@@ -31,6 +31,10 @@ interface SendMessagePayload {
   fileSize?: number;
   size?: number;
   replyToId?: string;
+  audioDuration?: number;
+  duration?: number;
+  audioWaveform?: number[];
+  waveform?: number[];
 }
 
 interface ReadMessagePayload {
@@ -160,6 +164,12 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
         const fileSize = typeof value.fileSize === 'number' ? value.fileSize : (typeof (value as any).size === 'number' ? (value as any).size : undefined);
         const mentions = Array.isArray((value as any).mentions) ? (value as any).mentions : undefined;
         const replyToId = typeof value.replyToId === 'string' ? value.replyToId : (typeof (value as any).replyToId === 'string' ? (value as any).replyToId : undefined);
+        const audioDuration = typeof (value as any).audioDuration === 'number'
+          ? (value as any).audioDuration
+          : (typeof (value as any).duration === 'number' ? (value as any).duration : undefined);
+        const audioWaveform = Array.isArray((value as any).audioWaveform)
+          ? (value as any).audioWaveform
+          : (Array.isArray((value as any).waveform) ? (value as any).waveform : undefined);
 
         const { message, participants, isDuplicate } = await saveMessage(
           senderId,
@@ -171,7 +181,9 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           fileName,
           fileSize,
           mentions,
-          replyToId
+          replyToId,
+          audioDuration,
+          audioWaveform
         );
 
         if (isDuplicate) {
