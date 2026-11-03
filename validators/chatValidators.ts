@@ -51,7 +51,8 @@ export const sendMessageSchema = z.object({
   fileType: z.string().optional().nullable(),
   type: z.string().optional().nullable(),
   fileName: z.string().trim().max(255).optional().nullable(),
-  fileSize: z.number().int().min(0).max(26214400).optional().nullable()
+  fileSize: z.number().int().min(0).max(26214400).optional().nullable(),
+  replyToId: z.string().trim().max(100).optional().nullable()
 })
   .passthrough()
   .refine((val) => {
@@ -73,7 +74,17 @@ export const editMessageSchema = z.object({
 
 export const deleteMessageSchema = z.object({
   conversationId: z.string().trim().min(1).max(100).optional(),
-  messageId: z.string().trim().min(1).max(100).optional()
+  messageId: z.string().trim().min(1).max(100).optional(),
+  deleteForEveryone: z.boolean().optional()
+}).passthrough();
+
+export const toggleReactionSchema = z.object({
+  emoji: z.string().trim().min(1, 'Emoji is required').max(32)
+}).passthrough();
+
+export const forwardMessagesSchema = z.object({
+  messageIds: z.array(z.string().trim().min(1).max(100)).min(1, 'At least one messageId is required').max(50),
+  targetConversationIds: z.array(z.string().trim().min(1).max(100)).min(1, 'At least one targetConversationId is required').max(20)
 }).passthrough();
 
 export const typingSchema = z.object({

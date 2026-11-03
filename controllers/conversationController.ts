@@ -11,7 +11,9 @@ import {
   makeGroupAdmin,
   dismissGroupAdmin,
   editMessage,
-  deleteMessage
+  deleteMessage,
+  toggleMessageReaction,
+  forwardMessages
 } from '../services/chatService.js';
 import { getMultipleUserPresences } from '../services/presenceService.js';
 import { ApiError } from '../utils/ApiError.js';
@@ -400,11 +402,64 @@ export const deleteMessageController = async (req: Request, res: Response, next:
       throw new ApiError(400, 'messageId is required');
     }
 
-    const result = await deleteMessage(userId, conversationId, messageId);
+    const deleteForEveryone = req.body?.deleteForEveryone !== false;
+    const result = await deleteMessage(userId, conversationId, messageId, deleteForEveryone);
 
     res.status(200).json({
       success: true,
       message: 'Message deleted successfully',
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const toggleMessageReactionController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const rawId = req.params.id;
+    const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!conversationId) {
+      throw new ApiError(400, 'conversationId is required');
+    }
+
+    const rawMsgId = req.params.messageId;
+    const messageId = Array.isArray(rawMsgId) ? rawMsgId[0] : rawMsgId;
+    if (!messageId) {
+      throw new ApiError(400, 'messageId is required');
+    }
+
+    const { emoji } = req.body;
+    const result = await toggleMessageReaction(userId, conversationId, messageId, emoji);
+
+    res.status(200).json({
+      success: true,
+      message: 'Reaction updated successfully',
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const forwardMessagesController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const { messageIds, targetConversationIds } = req.body;
+    const result = await forwardMessages(userId, messageIds, targetConversationIds);
+
+    res.status(200).json({
+      success: true,
+      message: 'Messages forwarded successfully',
       data: result
     });
   } catch (err) {
