@@ -258,6 +258,53 @@ export const deriveFileTypeFromUrl = (fileUrl?: string): string | undefined => {
   }
 };
 
+export const formatReactions = (reactions: { emoji: string; userId: string }[]) => {
+  const map = new Map<string, string[]>();
+  for (const r of reactions) {
+    if (!map.has(r.emoji)) map.set(r.emoji, []);
+    map.get(r.emoji)!.push(r.userId);
+  }
+  return Array.from(map.entries()).map(([emoji, userIds]) => ({
+    emoji,
+    count: userIds.length,
+    userIds
+  }));
+};
+
+export const messageInclude = {
+  sender: {
+    select: {
+      id: true,
+      name: true,
+      avatar: true
+    }
+  },
+  replyTo: {
+    select: {
+      id: true,
+      content: true,
+      fileUrl: true,
+      fileType: true,
+      fileName: true,
+      isDeleted: true,
+      sender: {
+        select: {
+          id: true,
+          name: true,
+          avatar: true
+        }
+      }
+    }
+  },
+  reactions: {
+    select: {
+      id: true,
+      emoji: true,
+      userId: true
+    }
+  }
+};
+
 export const saveMessage = async (
   senderId: string,
   conversationId: string,
@@ -267,7 +314,8 @@ export const saveMessage = async (
   clientMessageId?: string,
   fileName?: string,
   fileSize?: number,
-  mentions?: string[]
+  mentions?: string[],
+  replyToId?: string
 ) => {
   const hasText = Boolean(content && content.trim().length > 0);
   const hasMedia = Boolean(fileUrl && fileUrl.trim().length > 0);
@@ -368,7 +416,6 @@ export const saveMessage = async (
       );
     }
 
-    // Auto-detect mention if text contains @UserName
     if (validMentionedUserIds.length === 0 && content) {
       for (const p of participants) {
         if (p.user?.name && content.toLowerCase().includes(`@${p.user.name.toLowerCase()}`)) {
@@ -376,6 +423,17 @@ export const saveMessage = async (
         }
       }
       validMentionedUserIds = Array.from(new Set(validMentionedUserIds));
+    }
+
+    let validatedReplyToId: string | null = null;
+    if (replyToId) {
+      const replyMsg = await tx.message.findFirst({
+        where: { id: replyToId, conversationId: resolvedConversationId },
+        select: { id: true }
+      });
+      if (replyMsg) {
+        validatedReplyToId = replyMsg.id;
+      }
     }
 
     if (clientMessageId) {
@@ -387,15 +445,7 @@ export const saveMessage = async (
             clientMessageId
           }
         },
-        include: {
-          sender: {
-            select: {
-              id: true,
-              name: true,
-              avatar: true
-            }
-          }
-        }
+        include: messageInclude
       });
 
       if (existingMessage) {
@@ -404,7 +454,11 @@ export const saveMessage = async (
           .filter(Boolean);
 
         return {
-          message: { ...existingMessage, mentionedUsers: existingMentionedUsers },
+          message: {
+            ...existingMessage,
+            reactions: formatReactions((existingMessage as any).reactions || []),
+            mentionedUsers: existingMentionedUsers
+          },
           participants,
           isDuplicate: true,
           conversationId: resolvedConversationId
@@ -433,17 +487,10 @@ export const saveMessage = async (
           fileSize: typeof fileSize === 'number' ? fileSize : null,
           clientMessageId,
           seq: updatedConversation.lastSeq,
-          mentionedUserIds: validMentionedUserIds
+          mentionedUserIds: validMentionedUserIds,
+          replyToId: validatedReplyToId
         },
-        include: {
-          sender: {
-            select: {
-              id: true,
-              name: true,
-              avatar: true
-            }
-          }
-        }
+        include: messageInclude
       });
     } catch (err: any) {
       if (err?.code === 'P2002' && clientMessageId) {
@@ -455,15 +502,7 @@ export const saveMessage = async (
               clientMessageId
             }
           },
-          include: {
-            sender: {
-              select: {
-                id: true,
-                name: true,
-                avatar: true
-              }
-            }
-          }
+          include: messageInclude
         });
 
         if (existingMessage) {
@@ -472,7 +511,11 @@ export const saveMessage = async (
             .filter(Boolean);
 
           return {
-            message: { ...existingMessage, mentionedUsers: existingMentionedUsers },
+            message: {
+              ...existingMessage,
+              reactions: formatReactions((existingMessage as any).reactions || []),
+              mentionedUsers: existingMentionedUsers
+            },
             participants,
             isDuplicate: true,
             conversationId: resolvedConversationId
@@ -487,7 +530,11 @@ export const saveMessage = async (
       .filter(Boolean);
 
     return {
-      message: { ...message, mentionedUsers },
+      message: {
+        ...message,
+        reactions: formatReactions((message as any).reactions || []),
+        mentionedUsers
+      },
       participants,
       isDuplicate: false,
       conversationId: resolvedConversationId
@@ -532,15 +579,7 @@ export const getConversationMessages = async (
     },
     take: queryLimit + 1,
     orderBy: [{ seq: 'desc' }, { id: 'desc' }],
-    include: {
-      sender: {
-        select: {
-          id: true,
-          name: true,
-          avatar: true
-        }
-      }
-    }
+    include: messageInclude
   });
 
   let hasNextPage = false;
@@ -567,6 +606,7 @@ export const getConversationMessages = async (
 
   const enrichedMessages = messages.map((msg: any) => ({
     ...msg,
+    reactions: formatReactions(msg.reactions || []),
     mentionedUsers: (msg.mentionedUserIds || [])
       .map((mId: string) => mentionedUserMap.get(mId))
       .filter(Boolean)
@@ -1380,15 +1420,7 @@ export const editMessage = async (
 
   const message = await prisma.message.findUnique({
     where: { id: messageId },
-    include: {
-      sender: {
-        select: {
-          id: true,
-          name: true,
-          avatar: true
-        }
-      }
-    }
+    include: messageInclude
   });
 
   if (!message || message.conversationId !== resolvedConversationId) {
@@ -1399,21 +1431,19 @@ export const editMessage = async (
     throw new ApiError(403, 'You can only edit your own messages');
   }
 
+  if (message.isDeleted) {
+    throw new ApiError(400, 'Cannot edit a deleted message');
+  }
+
   const updatedMessage = await prisma.message.update({
     where: { id: messageId },
     data: {
       content: newContent.trim(),
+      isEdited: true,
+      editedAt: new Date(),
       updatedAt: new Date()
     },
-    include: {
-      sender: {
-        select: {
-          id: true,
-          name: true,
-          avatar: true
-        }
-      }
-    }
+    include: messageInclude
   });
 
   const mentionedUserIds = (updatedMessage as any).mentionedUserIds || [];
@@ -1425,7 +1455,11 @@ export const editMessage = async (
     });
   }
 
-  const enrichedMessage = { ...updatedMessage, mentionedUsers };
+  const enrichedMessage = {
+    ...updatedMessage,
+    reactions: formatReactions((updatedMessage as any).reactions || []),
+    mentionedUsers
+  };
 
   try {
     const io = getIO();
@@ -1463,7 +1497,8 @@ export const editMessage = async (
 export const deleteMessage = async (
   userId: string,
   conversationIdOrTarget: string,
-  messageId: string
+  messageId: string,
+  deleteForEveryone: boolean = true
 ) => {
   const resolvedConversationId = await resolveConversationId(userId, conversationIdOrTarget);
   if (!resolvedConversationId) {
@@ -1500,22 +1535,31 @@ export const deleteMessage = async (
     throw new ApiError(403, 'You do not have permission to delete this message');
   }
 
-  await prisma.message.delete({
-    where: { id: messageId }
-  });
+  let deletedPayload: any;
+  if (deleteForEveryone) {
+    deletedPayload = await prisma.message.update({
+      where: { id: messageId },
+      data: {
+        isDeleted: true,
+        deletedAt: new Date(),
+        content: 'This message was deleted',
+        fileUrl: null,
+        fileType: null,
+        fileName: null,
+        fileSize: null
+      },
+      include: messageInclude
+    });
+  } else {
+    await prisma.message.delete({
+      where: { id: messageId }
+    });
+  }
 
   const lastMessage = await prisma.message.findFirst({
     where: { conversationId: resolvedConversationId },
     orderBy: [{ seq: 'desc' }, { id: 'desc' }],
-    include: {
-      sender: {
-        select: {
-          id: true,
-          name: true,
-          avatar: true
-        }
-      }
-    }
+    include: messageInclude
   });
 
   try {
@@ -1526,20 +1570,231 @@ export const deleteMessage = async (
     }
     io.to(rooms).emit(CHAT_EVENTS.MESSAGE_DELETED, {
       conversationId: resolvedConversationId,
-      messageId
+      messageId,
+      isDeleted: true,
+      message: deletedPayload ? {
+        ...deletedPayload,
+        reactions: formatReactions((deletedPayload as any).reactions || []),
+        mentionedUsers: []
+      } : null
     });
 
     message.conversation.participants.forEach((p) => {
       io.to(`user:${p.userId}`).emit(CHAT_EVENTS.CONVERSATION_UPDATE, {
         conversationId: resolvedConversationId,
-        lastMessage: lastMessage || null
+        lastMessage: lastMessage ? {
+          ...lastMessage,
+          reactions: formatReactions((lastMessage as any).reactions || []),
+          mentionedUsers: []
+        } : null
       });
     });
   } catch (err: any) {
     logger.error('Failed to emit message:deleted event', { messageId, error: err.message });
   }
 
-  return { success: true, messageId, conversationId: resolvedConversationId };
+  return { success: true, messageId, conversationId: resolvedConversationId, isDeleted: true };
+};
+
+export const toggleMessageReaction = async (
+  userId: string,
+  conversationIdOrTarget: string,
+  messageId: string,
+  emoji: string
+) => {
+  if (!emoji || !emoji.trim()) {
+    throw new ApiError(400, 'Emoji is required');
+  }
+
+  const resolvedConversationId = await resolveConversationId(userId, conversationIdOrTarget);
+  if (!resolvedConversationId) {
+    throw new ApiError(404, 'Conversation not found or you are not a participant');
+  }
+
+  const message = await prisma.message.findUnique({
+    where: { id: messageId }
+  });
+
+  if (!message || message.conversationId !== resolvedConversationId) {
+    throw new ApiError(404, 'Message not found');
+  }
+
+  if (message.isDeleted) {
+    throw new ApiError(400, 'Cannot react to a deleted message');
+  }
+
+  const trimmedEmoji = emoji.trim();
+
+  const existingReaction = await prisma.messageReaction.findUnique({
+    where: {
+      messageId_userId_emoji: {
+        messageId,
+        userId,
+        emoji: trimmedEmoji
+      }
+    }
+  });
+
+  let action: 'added' | 'removed';
+  if (existingReaction) {
+    await prisma.messageReaction.delete({
+      where: { id: existingReaction.id }
+    });
+    action = 'removed';
+  } else {
+    await prisma.messageReaction.create({
+      data: {
+        messageId,
+        userId,
+        emoji: trimmedEmoji
+      }
+    });
+    action = 'added';
+  }
+
+  const allReactions = await prisma.messageReaction.findMany({
+    where: { messageId },
+    select: { emoji: true, userId: true }
+  });
+
+  const formatted = formatReactions(allReactions);
+
+  try {
+    const io = getIO();
+    const rooms = [`conversation:${resolvedConversationId}`];
+    if (conversationIdOrTarget !== resolvedConversationId) {
+      rooms.push(`conversation:${conversationIdOrTarget}`);
+    }
+    io.to(rooms).emit(CHAT_EVENTS.MESSAGE_REACTION_UPDATED, {
+      conversationId: resolvedConversationId,
+      messageId,
+      emoji: trimmedEmoji,
+      userId,
+      action,
+      reactions: formatted
+    });
+  } catch (err: any) {
+    logger.error('Failed to emit message:reaction_updated event', { messageId, error: err.message });
+  }
+
+  return {
+    success: true,
+    messageId,
+    conversationId: resolvedConversationId,
+    emoji: trimmedEmoji,
+    userId,
+    action,
+    reactions: formatted
+  };
+};
+
+export const forwardMessages = async (
+  userId: string,
+  messageIds: string[],
+  targetConversationIds: string[]
+) => {
+  if (!Array.isArray(messageIds) || messageIds.length === 0) {
+    throw new ApiError(400, 'messageIds must be a non-empty array');
+  }
+  if (!Array.isArray(targetConversationIds) || targetConversationIds.length === 0) {
+    throw new ApiError(400, 'targetConversationIds must be a non-empty array');
+  }
+
+  const sourceMessages = await prisma.message.findMany({
+    where: { id: { in: messageIds } },
+    include: {
+      conversation: {
+        include: { participants: true }
+      }
+    }
+  });
+
+  if (sourceMessages.length === 0) {
+    throw new ApiError(404, 'No valid messages found to forward');
+  }
+
+  for (const srcMsg of sourceMessages) {
+    const isSourceParticipant = srcMsg.conversation.participants.some((p) => p.userId === userId);
+    if (!isSourceParticipant) {
+      throw new ApiError(403, 'You do not have access to one or more source messages');
+    }
+  }
+
+  const forwardedResults: any[] = [];
+  const io = getIO();
+
+  for (const targetId of targetConversationIds) {
+    const resolvedTargetId = await resolveConversationId(userId, targetId);
+    if (!resolvedTargetId) {
+      continue;
+    }
+
+    const participants = await prisma.conversationParticipant.findMany({
+      where: { conversationId: resolvedTargetId },
+      include: {
+        user: {
+          select: { id: true, name: true, avatar: true }
+        }
+      }
+    });
+
+    for (const srcMsg of sourceMessages) {
+      if (srcMsg.isDeleted) {
+        continue;
+      }
+
+      const updatedConv = await prisma.conversation.update({
+        where: { id: resolvedTargetId },
+        data: {
+          updatedAt: new Date(),
+          lastSeq: { increment: 1 }
+        }
+      });
+
+      const forwardedMsg = await prisma.message.create({
+        data: {
+          conversationId: resolvedTargetId,
+          senderId: userId,
+          content: srcMsg.content,
+          fileUrl: srcMsg.fileUrl,
+          fileType: srcMsg.fileType,
+          fileName: srcMsg.fileName,
+          fileSize: srcMsg.fileSize,
+          isForwarded: true,
+          forwardCount: (srcMsg.forwardCount || 0) + 1,
+          seq: updatedConv.lastSeq
+        },
+        include: messageInclude
+      });
+
+      const enriched = {
+        ...forwardedMsg,
+        reactions: [],
+        mentionedUsers: []
+      };
+
+      forwardedResults.push(enriched);
+
+      try {
+        const rooms = [`conversation:${resolvedTargetId}`];
+        if (targetId !== resolvedTargetId) {
+          rooms.push(`conversation:${targetId}`);
+        }
+        io.to(rooms).emit(CHAT_EVENTS.MESSAGE_NEW, enriched);
+
+        participants.forEach((p) => {
+          io.to(`user:${p.userId}`).emit(CHAT_EVENTS.CONVERSATION_UPDATE, {
+            conversationId: resolvedTargetId,
+            lastMessage: enriched
+          });
+        });
+      } catch (err: any) {
+        logger.error('Failed to emit message:new for forwarded message', { error: err.message });
+      }
+    }
+  }
+
+  return forwardedResults;
 };
 
 

@@ -13,7 +13,11 @@ export const CHAT_EVENTS = {
   MESSAGE_EDIT: 'message:edit',
   MESSAGE_UPDATED: 'message:updated',
   MESSAGE_DELETE: 'message:delete',
-  MESSAGE_DELETED: 'message:deleted'
+  MESSAGE_DELETED: 'message:deleted',
+  MESSAGE_REACT: 'message:react',
+  MESSAGE_REACTION_UPDATED: 'message:reaction_updated',
+  MESSAGE_FORWARD: 'message:forward',
+  MESSAGE_FORWARDED: 'message:forwarded'
 } as const;
 
 export const COMMUNITY_EVENTS = {
