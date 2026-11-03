@@ -286,6 +286,7 @@ export const messageInclude = {
       fileUrl: true,
       fileType: true,
       fileName: true,
+      audioDuration: true,
       isDeleted: true,
       sender: {
         select: {
@@ -315,7 +316,9 @@ export const saveMessage = async (
   fileName?: string,
   fileSize?: number,
   mentions?: string[],
-  replyToId?: string
+  replyToId?: string,
+  audioDuration?: number,
+  audioWaveform?: number[]
 ) => {
   const hasText = Boolean(content && content.trim().length > 0);
   const hasMedia = Boolean(fileUrl && fileUrl.trim().length > 0);
@@ -485,6 +488,8 @@ export const saveMessage = async (
           fileType: derivedType,
           fileName: fileName ? fileName.trim() : null,
           fileSize: typeof fileSize === 'number' ? fileSize : null,
+          audioDuration: typeof audioDuration === 'number' ? Math.round(audioDuration) : null,
+          audioWaveform: Array.isArray(audioWaveform) ? audioWaveform : [],
           clientMessageId,
           seq: updatedConversation.lastSeq,
           mentionedUserIds: validMentionedUserIds,
@@ -1546,7 +1551,9 @@ export const deleteMessage = async (
         fileUrl: null,
         fileType: null,
         fileName: null,
-        fileSize: null
+        fileSize: null,
+        audioDuration: null,
+        audioWaveform: []
       },
       include: messageInclude
     });
@@ -1760,6 +1767,8 @@ export const forwardMessages = async (
           fileType: srcMsg.fileType,
           fileName: srcMsg.fileName,
           fileSize: srcMsg.fileSize,
+          audioDuration: srcMsg.audioDuration,
+          audioWaveform: srcMsg.audioWaveform || [],
           isForwarded: true,
           forwardCount: (srcMsg.forwardCount || 0) + 1,
           seq: updatedConv.lastSeq
