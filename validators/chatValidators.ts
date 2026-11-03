@@ -52,7 +52,9 @@ export const sendMessageSchema = z.object({
   type: z.string().optional().nullable(),
   fileName: z.string().trim().max(255).optional().nullable(),
   fileSize: z.number().int().min(0).max(26214400).optional().nullable(),
-  replyToId: z.string().trim().max(100).optional().nullable()
+  replyToId: z.string().trim().max(100).optional().nullable(),
+  audioDuration: z.number().min(0).max(7200).optional().nullable(),
+  audioWaveform: z.array(z.number()).max(256).optional().default([])
 })
   .passthrough()
   .refine((val) => {
@@ -152,6 +154,6 @@ export const signUploadSchema = z.object({
   communityId: z.string().trim().max(100).optional(),
   fileName: z.string().trim().min(1).max(255),
   fileSize: z.number().int().min(1).max(26214400),
-  fileType: z.enum(['image', 'file', 'document']).optional(),
+  fileType: z.enum(['image', 'file', 'document', 'audio', 'voice']).optional(),
   folder: z.string().trim().max(100).optional()
 }).passthrough();
