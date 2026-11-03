@@ -62,8 +62,8 @@ Leave a conversation room when navigating away from the chat screen.
   ```
 
 #### 3. `message:send`
-Send a new text or media message in a conversation. Supports optimistic UI via `clientMessageId` and quoted replies via `replyToId`.
-* **Payload:**
+Send a new text, media, or voice message in a conversation. Supports optimistic UI via `clientMessageId`, quoted replies via `replyToId`, and voice notes via `audioDuration` and `audioWaveform`.
+* **Text / Media Payload:**
   ```json
   {
     "conversationId": "c4b9d031-18e4-4d45-933e-b490f2302821",
@@ -74,6 +74,19 @@ Send a new text or media message in a conversation. Supports optimistic UI via `
     "replyToId": "msg-original-uuid-123"
   }
   ```
+* **Voice Message Payload:**
+  ```json
+  {
+    "conversationId": "c4b9d031-18e4-4d45-933e-b490f2302821",
+    "clientMessageId": "temp-uuid-voice-123",
+    "content": "",
+    "fileUrl": "https://s3.amazonaws.com/quorum-bucket/conversations/conv-123/voice.m4a",
+    "fileType": "voice",
+    "fileName": "voice_note.m4a",
+    "audioDuration": 8,
+    "audioWaveform": [0.15, 0.45, 0.8, 0.65, 0.3, 0.9, 0.55, 0.2]
+  }
+  ```
 * **Acknowledgement Callback:**
   ```json
   {
@@ -82,22 +95,16 @@ Send a new text or media message in a conversation. Supports optimistic UI via `
       "id": "msg-9f20e4b8-2e0f-4df4-a829-d591b9204391",
       "conversationId": "c4b9d031-18e4-4d45-933e-b490f2302821",
       "senderId": "user-uuid-123",
-      "content": "Sounds great! Let's do that.",
-      "fileUrl": "https://res.cloudinary.com/quorum/image/upload/sample.jpg",
-      "fileType": "image",
+      "content": "",
+      "fileUrl": "https://s3.amazonaws.com/quorum-bucket/conversations/conv-123/voice.m4a",
+      "fileType": "voice",
+      "fileName": "voice_note.m4a",
+      "fileSize": 65536,
+      "audioDuration": 8,
+      "audioWaveform": [0.15, 0.45, 0.8, 0.65, 0.3, 0.9, 0.55, 0.2],
       "seq": 42,
-      "replyToId": "msg-original-uuid-123",
-      "replyTo": {
-        "id": "msg-original-uuid-123",
-        "content": "Should we deploy this afternoon?",
-        "fileUrl": null,
-        "fileType": null,
-        "sender": {
-          "id": "user-uuid-456",
-          "name": "Sarah Connor",
-          "avatar": "https://res.cloudinary.com/..."
-        }
-      },
+      "replyToId": null,
+      "replyTo": null,
       "isEdited": false,
       "editedAt": null,
       "isForwarded": false,
@@ -267,8 +274,12 @@ Broadcasted to the conversation room when a new message is posted or forwarded.
     "replyTo": {
       "id": "msg-reply-target-uuid",
       "content": "Original message text",
+      "fileUrl": null,
+      "audioDuration": null,
       "sender": { "id": "user-id", "name": "Original Sender", "avatar": "..." }
     },
+    "audioDuration": null,
+    "audioWaveform": [],
     "isEdited": false,
     "isForwarded": false,
     "forwardCount": 0,
@@ -627,23 +638,47 @@ Update group title or avatar picture.
     "folder": "chat_attachments"
   }
   ```
+### 10. Media & Voice Uploads (Cloudinary / S3 Presigned URL)
+* **Endpoint:** `POST /api/uploads/sign`
+* **General / Cloudinary Upload Body:**
+  ```json
+  {
+    "folder": "chat_attachments"
+  }
+  ```
+* **Conversation File / Voice Note Upload Body:**
+  ```json
+  {
+    "conversationId": "c4b9d031-18e4-4d45-933e-b490f2302821",
+    "fileName": "voice_recording.m4a",
+    "fileSize": 65536,
+    "fileType": "voice"
+  }
+  ```
 * **Response (200 OK):**
   ```json
   {
     "success": true,
     "data": {
-      "uploadUrl": "https://api.cloudinary.com/v1_1/your-cloud-name/auto/upload",
-      "timestamp": 1791374400,
-      "signature": "3f6a2b...",
-      "apiKey": "1234567890",
-      "folder": "quorum_uploads/chat_attachments"
+      "uploadUrl": "https://quorum-bucket.s3.amazonaws.com/conversations/conv-123/voice.m4a?AWSAccessKeyId=...",
+      "fileUrl": "https://quorum-bucket.s3.amazonaws.com/conversations/conv-123/voice.m4a",
+      "key": "conversations/conv-123/voice.m4a",
+      "storageProvider": "s3",
+      "metadata": {
+        "fileName": "voice_recording.m4a",
+        "fileSize": 65536,
+        "fileType": "voice",
+        "contentType": "audio/mp4"
+      }
     }
   }
   ```
-* **Upload Flow:**
-  1. Call `POST /api/uploads/sign` to get signature, timestamp, and upload URL.
-  2. Directly upload the binary file from frontend to Cloudinary using `multipart/form-data`.
-  3. Send the resulting `secure_url` in `fileUrl` via `message:send`.
+* **Voice Note Upload Flow:**
+  1. Record audio on device (supports `.m4a`, `.mp3`, `.wav`, `.aac`, `.ogg`, `.opus`, `.webm`).
+  2. Compute audio duration and sampled sound amplitudes for the waveform array.
+  3. Call `POST /api/uploads/sign` with `fileType: "voice"` to receive `uploadUrl` and `fileUrl`.
+  4. Perform HTTP `PUT` (or POST for Cloudinary) with the audio blob to `uploadUrl`.
+  5. Emit `message:send` over Socket.IO passing `fileUrl`, `fileType: "voice"`, `audioDuration`, and `audioWaveform`.
 
 ### 11. FCM Push Device Tokens
 * **Register Device:** `POST /api/devices`
