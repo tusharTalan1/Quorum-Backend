@@ -17,7 +17,9 @@ export const CHAT_EVENTS = {
   MESSAGE_REACT: 'message:react',
   MESSAGE_REACTION_UPDATED: 'message:reaction_updated',
   MESSAGE_FORWARD: 'message:forward',
-  MESSAGE_FORWARDED: 'message:forwarded'
+  MESSAGE_FORWARDED: 'message:forwarded',
+  POLL_VOTE: 'poll:vote',
+  POLL_UPDATED: 'poll:updated'
 } as const;
 
 export const COMMUNITY_EVENTS = {
