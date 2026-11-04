@@ -255,6 +255,63 @@ Forward one or more messages to one or more target conversations simultaneously.
   }
   ```
 
+#### 10. `poll:vote`
+Cast or toggle vote on one or more options of a poll in a conversation.
+* **Payload:**
+  ```json
+  {
+    "conversationId": "c4b9d031-18e4-4d45-933e-b490f2302821",
+    "messageId": "msg-uuid-poll-1",
+    "optionIds": ["opt-uuid-1"]
+  }
+  ```
+  *(Note: You can pass either `messageId` or `pollId`).*
+* **Acknowledgement Callback:**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "success": true,
+      "conversationId": "c4b9d031-18e4-4d45-933e-b490f2302821",
+      "messageId": "msg-uuid-poll-1",
+      "pollId": "poll-uuid-1",
+      "poll": {
+        "id": "poll-uuid-1",
+        "question": "Which framework should we use?",
+        "allowMultipleAnswers": false,
+        "totalVotes": 3,
+        "uniqueVotersCount": 3,
+        "hasVoted": true,
+        "userVotedOptionIds": ["opt-uuid-1"],
+        "options": [
+          {
+            "id": "opt-uuid-1",
+            "text": "React",
+            "order": 0,
+            "voteCount": 2,
+            "hasVoted": true,
+            "voters": [
+              {
+                "userId": "user-uuid-1",
+                "user": { "id": "user-uuid-1", "name": "Alice", "avatar": "https://..." },
+                "createdAt": "2026-11-04T21:40:00.000Z"
+              }
+            ]
+          },
+          {
+            "id": "opt-uuid-2",
+            "text": "Vue",
+            "order": 1,
+            "voteCount": 1,
+            "hasVoted": false,
+            "voters": []
+          }
+        ]
+      }
+    }
+  }
+  ```
+
 ---
 
 ### B. Server → Client Broadcast Events
@@ -392,6 +449,46 @@ Broadcasted to a participant's personal channel (`user:${userId}`) when they are
 Broadcasted to contacts/co-participants when a user connects or disconnects.
 * **Online Payload:** `{ "userId": "user-uuid" }`
 * **Offline Payload:** `{ "userId": "user-uuid", "lastSeen": "2026-10-09T18:05:00.000Z" }`
+
+#### 10. `poll:updated`
+Broadcasted in real-time to all conversation participants whenever any user casts, changes, or removes a vote on a poll.
+* **Payload:**
+  ```json
+  {
+    "conversationId": "c4b9d031-18e4-4d45-933e-b490f2302821",
+    "messageId": "msg-uuid-poll-1",
+    "pollId": "poll-uuid-1",
+    "poll": {
+      "id": "poll-uuid-1",
+      "question": "Which framework should we use?",
+      "allowMultipleAnswers": false,
+      "totalVotes": 4,
+      "uniqueVotersCount": 4,
+      "options": [
+        {
+          "id": "opt-uuid-1",
+          "text": "React",
+          "order": 0,
+          "voteCount": 3,
+          "voters": [
+            {
+              "userId": "user-uuid-1",
+              "user": { "id": "user-uuid-1", "name": "Alice", "avatar": "https://..." },
+              "createdAt": "2026-11-04T21:40:00.000Z"
+            }
+          ]
+        },
+        {
+          "id": "opt-uuid-2",
+          "text": "Vue",
+          "order": 1,
+          "voteCount": 1,
+          "voters": []
+        }
+      ]
+    }
+  }
+  ```
 
 ---
 
@@ -796,6 +893,103 @@ Forward one or more messages to one or more conversations simultaneously.
         "forwardCount": 1
       }
     ]
+  }
+  ```
+
+### 16. Create Poll in Conversation
+Create a WhatsApp-like poll message across Direct Messages, Projects, Groups, Teams, or Channels.
+* **Endpoint:** `POST /api/conversations/:id/messages/poll`
+* **Body:**
+  ```json
+  {
+    "question": "Which tech stack should we pick for the project?",
+    "options": [
+      "Next.js + TypeScript",
+      "Vite + React",
+      "Flutter"
+    ],
+    "allowMultipleAnswers": false,
+    "replyToId": "optional-reply-target-msg-uuid"
+  }
+  ```
+* **Response (201 Created):**
+  ```json
+  {
+    "success": true,
+    "message": "Poll created successfully",
+    "data": {
+      "id": "msg-uuid",
+      "conversationId": "conv-uuid",
+      "senderId": "user-uuid",
+      "content": "Which tech stack should we pick for the project?",
+      "fileType": "poll",
+      "poll": {
+        "id": "poll-uuid",
+        "question": "Which tech stack should we pick for the project?",
+        "allowMultipleAnswers": false,
+        "totalVotes": 0,
+        "uniqueVotersCount": 0,
+        "hasVoted": false,
+        "userVotedOptionIds": [],
+        "options": [
+          { "id": "opt-1", "text": "Next.js + TypeScript", "order": 0, "voteCount": 0, "hasVoted": false, "voters": [] },
+          { "id": "opt-2", "text": "Vite + React", "order": 1, "voteCount": 0, "hasVoted": false, "voters": [] },
+          { "id": "opt-3", "text": "Flutter", "order": 2, "voteCount": 0, "hasVoted": false, "voters": [] }
+        ]
+      }
+    }
+  }
+  ```
+
+### 17. Vote on Poll
+Cast or toggle a vote on a poll option via REST. Supports voting by message ID (`/messages/:messageId/poll/vote`) or by poll ID (`/polls/:pollId/vote`).
+* **Endpoint:** `POST /api/conversations/:id/messages/:messageId/poll/vote` (or `POST /api/conversations/:id/polls/:pollId/vote`)
+* **Body:**
+  ```json
+  {
+    "optionIds": ["opt-1"]
+  }
+  ```
+* **Response (200 OK):**
+  ```json
+  {
+    "success": true,
+    "message": "Vote recorded successfully",
+    "data": {
+      "success": true,
+      "conversationId": "conv-uuid",
+      "messageId": "msg-uuid",
+      "pollId": "poll-uuid",
+      "poll": {
+        "id": "poll-uuid",
+        "question": "Which tech stack should we pick for the project?",
+        "allowMultipleAnswers": false,
+        "totalVotes": 1,
+        "uniqueVotersCount": 1,
+        "hasVoted": true,
+        "userVotedOptionIds": ["opt-1"],
+        "options": [
+          {
+            "id": "opt-1",
+            "text": "Next.js + TypeScript",
+            "order": 0,
+            "voteCount": 1,
+            "hasVoted": true,
+            "voters": [
+              { "userId": "user-uuid", "user": { "id": "user-uuid", "name": "Alice", "avatar": null }, "createdAt": "2026-11-04T21:50:00.000Z" }
+            ]
+          },
+          {
+            "id": "opt-2",
+            "text": "Vite + React",
+            "order": 1,
+            "voteCount": 0,
+            "hasVoted": false,
+            "voters": []
+          }
+        ]
+      }
+    }
   }
   ```
 
