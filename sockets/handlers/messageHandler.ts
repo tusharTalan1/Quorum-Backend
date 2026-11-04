@@ -8,7 +8,8 @@ import {
   editMessage,
   deleteMessage,
   toggleMessageReaction,
-  forwardMessages
+  forwardMessages,
+  votePoll
 } from '../../services/chatService.js';
 import { sendPushToOfflineUsers } from '../../services/notificationService.js';
 import { checkSocketMessageRateLimit } from '../../middlewares/rateLimiter.js';
@@ -35,6 +36,11 @@ interface SendMessagePayload {
   duration?: number;
   audioWaveform?: number[];
   waveform?: number[];
+  poll?: {
+    question: string;
+    options: string[];
+    allowMultipleAnswers?: boolean;
+  };
 }
 
 interface ReadMessagePayload {
@@ -170,6 +176,7 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
         const audioWaveform = Array.isArray((value as any).audioWaveform)
           ? (value as any).audioWaveform
           : (Array.isArray((value as any).waveform) ? (value as any).waveform : undefined);
+        const poll = (value as any).poll;
 
         const { message, participants, isDuplicate } = await saveMessage(
           senderId,
@@ -183,7 +190,8 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
           mentions,
           replyToId,
           audioDuration,
-          audioWaveform
+          audioWaveform,
+          poll
         );
 
         if (isDuplicate) {
@@ -500,6 +508,43 @@ export const registerMessageHandler = (io: SocketIOServer, socket: Authenticated
             callback(formatErrorResponse(code, err.message));
           } else {
             callback(formatErrorResponse('SERVER_ERROR', 'Failed to forward messages'));
+          }
+        }
+      }
+    }
+  );
+
+  socket.on(
+    CHAT_EVENTS.POLL_VOTE,
+    async (
+      payload: { conversationId: string; messageId?: string; pollId?: string; optionIds: string[] },
+      callback?: (response: SocketCallbackResponse) => void
+    ) => {
+      try {
+        const userId = socket.data.user?.id;
+        if (!userId || !socket.data.user?.isAuthenticated) {
+          if (callback) callback(formatErrorResponse('UNAUTHORIZED', 'Unauthorized socket. Authentication required.'));
+          return;
+        }
+
+        const pollIdOrMessageId = payload?.pollId || payload?.messageId;
+        if (!payload?.conversationId || !pollIdOrMessageId || !Array.isArray(payload?.optionIds) || payload.optionIds.length === 0) {
+          if (callback) callback(formatErrorResponse('INVALID_PAYLOAD', 'conversationId, messageId or pollId, and non-empty optionIds array are required'));
+          return;
+        }
+
+        const result = await votePoll(userId, payload.conversationId, pollIdOrMessageId, payload.optionIds);
+        if (callback) {
+          callback({ success: true, data: result });
+        }
+      } catch (err: any) {
+        logger.error('Error voting on poll via socket', { error: err.message });
+        if (callback) {
+          if (err instanceof ApiError) {
+            const code = err.statusCode === 403 ? 'FORBIDDEN' : err.statusCode === 404 ? 'NOT_FOUND' : 'INVALID_PAYLOAD';
+            callback(formatErrorResponse(code, err.message));
+          } else {
+            callback(formatErrorResponse('SERVER_ERROR', 'Failed to vote on poll'));
           }
         }
       }
