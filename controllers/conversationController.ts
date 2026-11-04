@@ -13,10 +13,15 @@ import {
   editMessage,
   deleteMessage,
   toggleMessageReaction,
-  forwardMessages
+  forwardMessages,
+  saveMessage,
+  votePoll
 } from '../services/chatService.js';
 import { getMultipleUserPresences } from '../services/presenceService.js';
 import { ApiError } from '../utils/ApiError.js';
+import { getIO } from '../sockets/socketServer.js';
+import { CHAT_EVENTS } from '../utils/constants.js';
+import logger from '../utils/logger.js';
 
 const parseAndValidatePagination = (
   rawCursor: unknown,
@@ -503,6 +508,103 @@ export const getConversationPresenceController = async (req: Request, res: Respo
         conversationId: conversation.id,
         presences: presencesObj
       }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const createPollController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const rawId = req.params.id;
+    const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!conversationId) {
+      throw new ApiError(400, 'conversationId is required');
+    }
+
+    const { question, options, allowMultipleAnswers, clientMessageId, replyToId } = req.body;
+
+    const { message, participants, isDuplicate, conversationId: resolvedConversationId } = await saveMessage(
+      userId,
+      conversationId,
+      question.trim(),
+      undefined,
+      'poll',
+      clientMessageId,
+      undefined,
+      undefined,
+      undefined,
+      replyToId,
+      undefined,
+      undefined,
+      {
+        question: question.trim(),
+        options,
+        allowMultipleAnswers: Boolean(allowMultipleAnswers)
+      }
+    );
+
+    if (!isDuplicate) {
+      try {
+        const io = getIO();
+        const conversationRooms = [`conversation:${resolvedConversationId}`];
+        if (conversationId !== resolvedConversationId) {
+          conversationRooms.push(`conversation:${conversationId}`);
+        }
+        io.to(conversationRooms).emit(CHAT_EVENTS.MESSAGE_NEW, message);
+
+        participants.forEach((p) => {
+          io.to(`user:${p.userId}`).emit(CHAT_EVENTS.CONVERSATION_UPDATE, {
+            conversationId: resolvedConversationId,
+            lastMessage: message
+          });
+        });
+      } catch (err: any) {
+        logger.error('Failed to emit socket events for created poll', { error: err.message });
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Poll created successfully',
+      data: message
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const votePollController = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const rawId = req.params.id;
+    const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!conversationId) {
+      throw new ApiError(400, 'conversationId is required');
+    }
+
+    const rawPollId = req.params.pollId || req.params.messageId;
+    const pollIdOrMessageId = Array.isArray(rawPollId) ? rawPollId[0] : rawPollId;
+    if (!pollIdOrMessageId) {
+      throw new ApiError(400, 'pollId or messageId is required');
+    }
+
+    const { optionIds } = req.body;
+    const result = await votePoll(userId, conversationId, pollIdOrMessageId, optionIds);
+
+    res.status(200).json({
+      success: true,
+      message: 'Vote recorded successfully',
+      data: result
     });
   } catch (err) {
     next(err);

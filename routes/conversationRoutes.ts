@@ -9,7 +9,9 @@ import {
   editMessageSchema,
   deleteMessageSchema,
   toggleReactionSchema,
-  forwardMessagesSchema
+  forwardMessagesSchema,
+  createPollSchema,
+  votePollSchema
 } from '../validators/chatValidators.js';
 import {
   getUserConversationsController,
@@ -28,7 +30,9 @@ import {
   deleteMessageController,
   getConversationPresenceController,
   toggleMessageReactionController,
-  forwardMessagesController
+  forwardMessagesController,
+  createPollController,
+  votePollController
 } from '../controllers/conversationController.js';
 import { createOrGetDMController } from '../controllers/dmController.js';
 
@@ -42,6 +46,9 @@ router.post('/dm', authMiddleware, chatLimiter, createOrGetDMController);
 router.get('/search', authMiddleware, searchLimiter, getUserConversationsController);
 router.post('/group', authMiddleware, validate(createGroupSchema), createGroupConversationController);
 router.post('/messages/forward', authMiddleware, validate(forwardMessagesSchema), forwardMessagesController);
+router.post('/:id/messages/poll', authMiddleware, validate(createPollSchema), createPollController);
+router.post('/:id/messages/:messageId/poll/vote', authMiddleware, validate(votePollSchema), votePollController);
+router.post('/:id/polls/:pollId/vote', authMiddleware, validate(votePollSchema), votePollController);
 router.get('/:id/presence', authMiddleware, getConversationPresenceController);
 router.get('/:id', authMiddleware, getConversationDetailsController);
 router.get('/:id/messages', authMiddleware, getConversationMessagesController);
