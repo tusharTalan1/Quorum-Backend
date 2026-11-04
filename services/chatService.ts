@@ -580,6 +580,11 @@ export const getConversationMessages = async (
   const messages = await prisma.message.findMany({
     where: {
       conversationId: targetConversationId,
+      NOT: {
+        deletedForUserIds: {
+          has: userId
+        }
+      },
       ...(cursorSeq !== null ? { seq: { lt: cursorSeq } } : {})
     },
     take: queryLimit + 1,
@@ -660,6 +665,11 @@ export const getUserConversations = async (userId: string, query?: string) => {
             content: {
               contains: trimmed,
               mode: 'insensitive'
+            },
+            NOT: {
+              deletedForUserIds: {
+                has: userId
+              }
             }
           }
         }
@@ -684,6 +694,13 @@ export const getUserConversations = async (userId: string, query?: string) => {
         }
       },
       messages: {
+        where: {
+          NOT: {
+            deletedForUserIds: {
+              has: userId
+            }
+          }
+        },
         take: 1,
         orderBy: [{ seq: 'desc' }, { id: 'desc' }],
         include: {
@@ -711,6 +728,7 @@ export const getUserConversations = async (userId: string, query?: string) => {
     LEFT JOIN "Message" m ON m."conversationId" = cp."conversationId"
       AND m."senderId" != cp."userId"
       AND m."seq" > cp."lastReadSeq"
+      AND NOT (${userId} = ANY(m."deletedForUserIds"))
     WHERE cp."userId" = ${userId}
     GROUP BY cp."conversationId"
   `;
@@ -865,6 +883,11 @@ export const searchConversationMessages = async (
     content: {
       contains: sanitizedQuery,
       mode: 'insensitive' as const
+    },
+    NOT: {
+      deletedForUserIds: {
+        has: userId
+      }
     },
     ...(cursorSeq !== null ? { seq: { lt: cursorSeq } } : {})
   };
@@ -1536,8 +1559,10 @@ export const deleteMessage = async (
     participant.role === 'admin' ||
     participant.role === 'owner';
 
-  if (!isSender && !isGroupAdmin) {
-    throw new ApiError(403, 'You do not have permission to delete this message');
+  if (deleteForEveryone) {
+    if (!isSender && !isGroupAdmin) {
+      throw new ApiError(403, 'You do not have permission to delete this message for everyone');
+    }
   }
 
   let deletedPayload: any;
@@ -1558,36 +1583,74 @@ export const deleteMessage = async (
       include: messageInclude
     });
   } else {
-    await prisma.message.delete({
-      where: { id: messageId }
-    });
+    const alreadyDeleted = (message as any).deletedForUserIds?.includes(userId);
+    if (!alreadyDeleted) {
+      deletedPayload = await prisma.message.update({
+        where: { id: messageId },
+        data: {
+          deletedForUserIds: {
+            push: userId
+          }
+        },
+        include: messageInclude
+      });
+    } else {
+      deletedPayload = message;
+    }
   }
 
   const lastMessage = await prisma.message.findFirst({
-    where: { conversationId: resolvedConversationId },
+    where: {
+      conversationId: resolvedConversationId,
+      NOT: {
+        deletedForUserIds: {
+          has: userId
+        }
+      }
+    },
     orderBy: [{ seq: 'desc' }, { id: 'desc' }],
     include: messageInclude
   });
 
   try {
     const io = getIO();
-    const rooms = [`conversation:${resolvedConversationId}`];
-    if (conversationIdOrTarget !== resolvedConversationId) {
-      rooms.push(`conversation:${conversationIdOrTarget}`);
-    }
-    io.to(rooms).emit(CHAT_EVENTS.MESSAGE_DELETED, {
-      conversationId: resolvedConversationId,
-      messageId,
-      isDeleted: true,
-      message: deletedPayload ? {
-        ...deletedPayload,
-        reactions: formatReactions((deletedPayload as any).reactions || []),
-        mentionedUsers: []
-      } : null
-    });
+    if (deleteForEveryone) {
+      const rooms = [`conversation:${resolvedConversationId}`];
+      if (conversationIdOrTarget !== resolvedConversationId) {
+        rooms.push(`conversation:${conversationIdOrTarget}`);
+      }
+      io.to(rooms).emit(CHAT_EVENTS.MESSAGE_DELETED, {
+        conversationId: resolvedConversationId,
+        messageId,
+        isDeleted: true,
+        deleteForEveryone: true,
+        message: deletedPayload ? {
+          ...deletedPayload,
+          reactions: formatReactions((deletedPayload as any).reactions || []),
+          mentionedUsers: []
+        } : null
+      });
 
-    message.conversation.participants.forEach((p) => {
-      io.to(`user:${p.userId}`).emit(CHAT_EVENTS.CONVERSATION_UPDATE, {
+      message.conversation.participants.forEach((p) => {
+        io.to(`user:${p.userId}`).emit(CHAT_EVENTS.CONVERSATION_UPDATE, {
+          conversationId: resolvedConversationId,
+          lastMessage: lastMessage ? {
+            ...lastMessage,
+            reactions: formatReactions((lastMessage as any).reactions || []),
+            mentionedUsers: []
+          } : null
+        });
+      });
+    } else {
+      io.to(`user:${userId}`).emit(CHAT_EVENTS.MESSAGE_DELETED, {
+        conversationId: resolvedConversationId,
+        messageId,
+        isDeleted: true,
+        deleteForEveryone: false,
+        deletedForMe: true
+      });
+
+      io.to(`user:${userId}`).emit(CHAT_EVENTS.CONVERSATION_UPDATE, {
         conversationId: resolvedConversationId,
         lastMessage: lastMessage ? {
           ...lastMessage,
@@ -1595,12 +1658,18 @@ export const deleteMessage = async (
           mentionedUsers: []
         } : null
       });
-    });
+    }
   } catch (err: any) {
     logger.error('Failed to emit message:deleted event', { messageId, error: err.message });
   }
 
-  return { success: true, messageId, conversationId: resolvedConversationId, isDeleted: true };
+  return {
+    success: true,
+    messageId,
+    conversationId: resolvedConversationId,
+    isDeleted: true,
+    deleteForEveryone
+  };
 };
 
 export const toggleMessageReaction = async (
@@ -1644,19 +1713,42 @@ export const toggleMessageReaction = async (
 
   let action: 'added' | 'removed';
   if (existingReaction) {
-    await prisma.messageReaction.delete({
-      where: { id: existingReaction.id }
-    });
-    action = 'removed';
-  } else {
-    await prisma.messageReaction.create({
-      data: {
-        messageId,
-        userId,
-        emoji: trimmedEmoji
+    try {
+      await prisma.messageReaction.delete({
+        where: { id: existingReaction.id }
+      });
+      action = 'removed';
+    } catch (delErr: any) {
+      if (delErr?.code === 'P2025') {
+        action = 'removed';
+      } else {
+        throw delErr;
       }
-    });
-    action = 'added';
+    }
+  } else {
+    try {
+      await prisma.messageReaction.create({
+        data: {
+          messageId,
+          userId,
+          emoji: trimmedEmoji
+        }
+      });
+      action = 'added';
+    } catch (createErr: any) {
+      if (createErr?.code === 'P2002') {
+        await prisma.messageReaction.deleteMany({
+          where: {
+            messageId,
+            userId,
+            emoji: trimmedEmoji
+          }
+        });
+        action = 'removed';
+      } else {
+        throw createErr;
+      }
+    }
   }
 
   const allReactions = await prisma.messageReaction.findMany({
@@ -1716,13 +1808,18 @@ export const forwardMessages = async (
     }
   });
 
-  if (sourceMessages.length === 0) {
+  const sourceMap = new Map(sourceMessages.map((m) => [m.id, m]));
+  const orderedSourceMessages = messageIds
+    .map((id) => sourceMap.get(id))
+    .filter((m): m is (typeof sourceMessages)[0] => Boolean(m));
+
+  if (orderedSourceMessages.length === 0) {
     throw new ApiError(404, 'No valid messages found to forward');
   }
 
-  for (const srcMsg of sourceMessages) {
+  for (const srcMsg of orderedSourceMessages) {
     const isSourceParticipant = srcMsg.conversation.participants.some((p) => p.userId === userId);
-    if (!isSourceParticipant) {
+    if (!isSourceParticipant || srcMsg.deletedForUserIds?.includes(userId)) {
       throw new ApiError(403, 'You do not have access to one or more source messages');
     }
   }
@@ -1745,8 +1842,8 @@ export const forwardMessages = async (
       }
     });
 
-    for (const srcMsg of sourceMessages) {
-      if (srcMsg.isDeleted) {
+    for (const srcMsg of orderedSourceMessages) {
+      if (srcMsg.isDeleted || srcMsg.deletedForUserIds?.includes(userId)) {
         continue;
       }
 

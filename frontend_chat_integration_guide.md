@@ -718,8 +718,9 @@ Edit a previously sent message within the 24-hour edit window (sender-only).
   }
   ```
 
-### 13. Delete Message ("Delete for everyone")
-Soft-deletes message, clears attachment references, and preserves reply-to hierarchy.
+### 13. Delete Message ("Delete for everyone" vs "Delete for me")
+* **Delete for everyone (`deleteForEveryone: true`):** Soft-deletes message for all participants, masks content with `"This message was deleted"`, clears attachment references, and preserves reply-to hierarchy (allowed for sender or admin).
+* **Delete for me (`deleteForEveryone: false`):** Hides message only from the requesting user's view and unread counts without affecting any other conversation participants (allowed for any participant).
 * **Endpoint:** `DELETE /api/conversations/:id/messages/:messageId`
 * **Body (Optional):**
   ```json
@@ -733,10 +734,10 @@ Soft-deletes message, clears attachment references, and preserves reply-to hiera
     "success": true,
     "message": "Message deleted successfully",
     "data": {
-      "id": "msg-uuid",
-      "content": "This message was deleted",
+      "messageId": "msg-uuid",
+      "conversationId": "conv-uuid",
       "isDeleted": true,
-      "deletedAt": "2026-10-09T18:06:00.000Z"
+      "deleteForEveryone": true
     }
   }
   ```

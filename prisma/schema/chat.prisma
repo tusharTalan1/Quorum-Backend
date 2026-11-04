@@ -42,6 +42,7 @@ model Message {
   fileSize         Int?
   audioDuration    Int?
   audioWaveform    Float[]           @default([])
+  deletedForUserIds String[]         @default([])
   isPinned         Boolean           @default(false)
   clientMessageId  String?
   seq              Int               @default(0)
