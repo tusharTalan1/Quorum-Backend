@@ -162,6 +162,7 @@ export const initSocketServer = (httpServer: any) => {
           name: true,
           email: true,
           role: true,
+          avatar: true,
           lockedUntil: true,
         },
       });
@@ -179,6 +180,7 @@ export const initSocketServer = (httpServer: any) => {
         name: dbUser.name || 'User',
         email: dbUser.email,
         role: dbUser.role,
+        avatar: dbUser.avatar || null,
         isAuthenticated: true,
       };
       socket.data.tokenPayload = decoded;
@@ -229,7 +231,7 @@ export const initSocketServer = (httpServer: any) => {
         }
         const dbUser = await prisma.user.findUnique({
           where: { id: decoded.id },
-          select: { id: true, name: true, email: true, role: true, lockedUntil: true }
+          select: { id: true, name: true, email: true, role: true, avatar: true, lockedUntil: true }
         });
         if (!dbUser || (dbUser.lockedUntil && dbUser.lockedUntil > new Date())) {
           ack?.({ success: false, message: 'Unauthorized' });
@@ -240,6 +242,7 @@ export const initSocketServer = (httpServer: any) => {
           name: dbUser.name || 'User',
           email: dbUser.email,
           role: dbUser.role,
+          avatar: dbUser.avatar || null,
           isAuthenticated: true,
         };
         socket.data.tokenPayload = decoded;

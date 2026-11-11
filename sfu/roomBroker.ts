@@ -58,7 +58,7 @@ export class RoomBroker extends EventEmitter {
     return room;
   }
 
-  public addPeer(roomCode: string, peerId: string, socketId: string, name?: string): Peer {
+  public addPeer(roomCode: string, peerId: string, socketId: string, name?: string, avatar?: string | null): Peer {
     const room = this.getOrCreateRoom(roomCode);
     let peer = room.peers.get(peerId);
 
@@ -66,6 +66,7 @@ export class RoomBroker extends EventEmitter {
       peer = {
         id: peerId,
         name: name || '',
+        avatar: avatar || null,
         socketId,
         publishedTracks: new Map(),
       };
@@ -73,6 +74,9 @@ export class RoomBroker extends EventEmitter {
       logger.info(`[SFU Broker] Peer ${peerId} joined SFU room ${roomCode}`);
     } else {
       peer.socketId = socketId;
+      if (avatar) {
+        peer.avatar = avatar;
+      }
     }
     return peer;
   }

@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { meetingRooms, formatParticipants, socketToMeetingsMap, ParticipantDTO, SocketAckResponse } from './meetingPresence.js';
+import { meetingRooms, formatParticipants, socketToMeetingsMap, ParticipantDTO, SocketAckResponse, getInitials } from './meetingPresence.js';
 
 export const handleAdmitParticipant = (
   io: Server,
@@ -67,6 +67,9 @@ export const handleAdmitParticipant = (
   const existingParticipant = roomState.participants.get(targetUserId.trim());
   if (existingParticipant) {
     activeSocketIds.forEach((sId) => existingParticipant.socketIds.add(sId));
+    if (waitingUser.avatar && !existingParticipant.avatar) {
+      existingParticipant.avatar = waitingUser.avatar;
+    }
   } else {
     roomState.participants.set(targetUserId.trim(), {
       userId: waitingUser.userId,
@@ -77,6 +80,8 @@ export const handleAdmitParticipant = (
       isMuted: false,
       hostMuted: false,
       isVideoOff: false,
+      avatar: waitingUser.avatar ?? null,
+      initials: waitingUser.initials || getInitials(waitingUser.name),
     });
   }
 
@@ -91,6 +96,8 @@ export const handleAdmitParticipant = (
     isMuted: admittedParticipant.isMuted ?? false,
     hostMuted: admittedParticipant.hostMuted ?? false,
     isVideoOff: admittedParticipant.isVideoOff ?? false,
+    avatar: admittedParticipant.avatar ?? null,
+    initials: admittedParticipant.initials || getInitials(admittedParticipant.name),
   };
 
   activeSocketIds.forEach((sId) => {

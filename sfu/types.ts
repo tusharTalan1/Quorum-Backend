@@ -5,6 +5,7 @@ import type { DtlsServerHandshake } from './protocols/dtls/dtlsHandshake.js';
 export interface Peer {
     id: string;
     name: string;
+    avatar?: string | null;
     socketId: string;
     peerConnection?: RTCPeerConnection;
     publishedTracks: Map<string, PublishedTrack>;

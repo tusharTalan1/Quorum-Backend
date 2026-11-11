@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { meetingRooms, SocketAckResponse, normalizeMeetingCode } from './meetingPresence.js';
+import { meetingRooms, SocketAckResponse, normalizeMeetingCode, getInitials } from './meetingPresence.js';
 import { peerConnectionManager } from '../sfu/peerConnection.js';
 
 export type MuteAction = 'mute' | 'unmute' | 'allow-unmute';
@@ -234,6 +234,8 @@ export const handleToggleCam = (
     userId: user.id,
     socketId: socket.id,
     isVideoOff,
+    avatar: participant.avatar ?? null,
+    initials: participant.initials || getInitials(participant.name),
   });
 
   ack?.({ success: true, data: { isVideoOff } });

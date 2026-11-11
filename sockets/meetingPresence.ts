@@ -18,6 +18,8 @@ export interface Participant {
     hostMuted?: boolean;
     isVideoOff?: boolean;
     isHandRaised?: boolean;
+    avatar?: string | null;
+    initials?: string;
 }
 
 export interface ParticipantDTO {
@@ -29,12 +31,16 @@ export interface ParticipantDTO {
     hostMuted?: boolean;
     isVideoOff?: boolean;
     isHandRaised?: boolean;
+    avatar?: string | null;
+    initials?: string;
 }
 
 export interface WaitingUser {
     userId: string;
     name: string;
     socketIds: Set<string>;
+    avatar?: string | null;
+    initials?: string;
 }
 
 export interface MeetingRoomState {
@@ -65,6 +71,16 @@ export const normalizeMeetingCode = (code: string): string => {
     return cleaned;
 };
 
+export const getInitials = (name?: string): string => {
+    if (!name || typeof name !== 'string') return '?';
+    const parts = name.trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return '?';
+    if (parts.length === 1) {
+        return parts[0].slice(0, 2).toUpperCase();
+    }
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+};
+
 export const formatParticipants = (participantsMap: Map<string, Participant>): ParticipantDTO[] => {
     return Array.from(participantsMap.values()).map((p) => ({
         userId: p.userId,
@@ -75,6 +91,8 @@ export const formatParticipants = (participantsMap: Map<string, Participant>): P
         hostMuted: p.hostMuted ?? false,
         isVideoOff: p.isVideoOff ?? false,
         isHandRaised: p.isHandRaised ?? false,
+        avatar: p.avatar ?? null,
+        initials: p.initials || getInitials(p.name),
     }));
 };
 
@@ -220,11 +238,16 @@ export const handleJoinMeeting = async (
         let waitingUser = roomState.waitingRoom.get(user.id);
         if (waitingUser) {
             waitingUser.socketIds.add(socket.id);
+            if (user.avatar && !waitingUser.avatar) {
+                waitingUser.avatar = user.avatar;
+            }
         } else {
             waitingUser = {
                 userId: user.id,
                 name: user.name || 'Guest',
                 socketIds: new Set([socket.id]),
+                avatar: user.avatar || null,
+                initials: getInitials(user.name || 'Guest'),
             };
             roomState.waitingRoom.set(user.id, waitingUser);
         }
@@ -251,6 +274,8 @@ export const handleJoinMeeting = async (
                         userId: waitingUser!.userId,
                         name: waitingUser!.name,
                         socketIds: Array.from(waitingUser!.socketIds),
+                        avatar: waitingUser!.avatar ?? null,
+                        initials: waitingUser!.initials || getInitials(waitingUser!.name),
                     },
                 });
             });
@@ -263,6 +288,9 @@ export const handleJoinMeeting = async (
 
     if (existingParticipant) {
         existingParticipant.socketIds.add(socket.id);
+        if (user.avatar && !existingParticipant.avatar) {
+            existingParticipant.avatar = user.avatar;
+        }
     } else {
         roomState.participants.set(user.id, {
             userId: user.id,
@@ -273,6 +301,8 @@ export const handleJoinMeeting = async (
             isMuted: false,
             hostMuted: false,
             isVideoOff: false,
+            avatar: user.avatar || null,
+            initials: getInitials(user.name || 'Participant'),
         });
     }
 
@@ -287,6 +317,8 @@ export const handleJoinMeeting = async (
         userId: w.userId,
         name: w.name,
         socketIds: Array.from(w.socketIds),
+        avatar: w.avatar ?? null,
+        initials: w.initials || getInitials(w.name),
     }));
     const currentParticipant = roomState.participants.get(user.id)!;
 
@@ -298,6 +330,8 @@ export const handleJoinMeeting = async (
         isMuted: currentParticipant.isMuted ?? false,
         hostMuted: currentParticipant.hostMuted ?? false,
         isVideoOff: currentParticipant.isVideoOff ?? false,
+        avatar: currentParticipant.avatar ?? null,
+        initials: currentParticipant.initials || getInitials(currentParticipant.name),
     };
 
     const joinedData = {

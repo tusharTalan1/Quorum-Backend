@@ -211,6 +211,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
 
     const effectivePeerId = socket.data.user.id || peerId;
     const effectiveName = socket.data.user.name || name || 'Participant';
+    const effectiveAvatar = socket.data.user.avatar || null;
 
     const permCheck = await canUserJoinMeeting(effectivePeerId, roomCode);
     if (!permCheck.allowed) {
@@ -245,7 +246,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
       }
 
       socket.join(roomCode);
-      roomBroker.addPeer(roomCode, effectivePeerId, socket.id, effectiveName);
+      roomBroker.addPeer(roomCode, effectivePeerId, socket.id, effectiveName, effectiveAvatar);
 
       const existingTracks = roomBroker.getRoomTracks(roomCode).map((t) => ({
         trackId: t.trackId,
@@ -258,7 +259,7 @@ export const registerSfuSignaling = (io: Server, socket: Socket) => {
         existingTracks,
         activeScreenSharer: roomBroker.getActiveScreenSharer(roomCode),
       });
-      socket.to(roomCode).emit('sfu:peer-joined', { peerId: effectivePeerId, name: effectiveName });
+      socket.to(roomCode).emit('sfu:peer-joined', { peerId: effectivePeerId, name: effectiveName, avatar: effectiveAvatar });
 
       for (const t of existingTracks) {
         if (t.peerId !== effectivePeerId) {
